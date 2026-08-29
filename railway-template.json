@@ -1,0 +1,44 @@
+{
+  "$schema": "https://railway.com/graph.schema.json",
+  "variables": {
+    "APP_ENV": "production",
+    "DATABASE_URL": "${{Postgres.DATABASE_URL}}",
+    "REDIS_URL": "${{Redis.REDIS_URL}}",
+    "DEXSCREENER_BASE_URL": "https://api.dexscreener.com",
+    "AI_ENABLED": "true",
+    "AI_BASE_URL": "https://agentrouter.org/v1",
+    "AI_MODEL": "glm-5.3",
+    "TRACKING_INTERVAL_SECONDS": "30",
+    "SCAN_INTERVAL_SECONDS": "30",
+    "MIN_LIQUIDITY_USD": "25000",
+    "MIN_VOLUME_24H_USD": "50000",
+    "MIN_TXNS_24H": "100",
+    "MIN_SCORE": "70",
+    "DEFAULT_MILESTONES": "1.25,1.5,2,3,5,10,20,50",
+    "ENABLED_CHAINS": "solana,ethereum,bsc",
+    "SNAPSHOT_RETENTION_DAYS": "30",
+    "LOG_LEVEL": "INFO"
+  },
+  "services": [
+    {
+      "name": "bot",
+      "variables": {"SERVICE_ROLE": "bot"},
+      "deploy": {"startCommand": "alembic upgrade head && python -m app.main", "healthcheckPath": "/health"}
+    },
+    {
+      "name": "scanner",
+      "variables": {"SERVICE_ROLE": "scanner"},
+      "deploy": {"startCommand": "alembic upgrade head && python -m app.main"}
+    },
+    {
+      "name": "tracker",
+      "variables": {"SERVICE_ROLE": "tracker"},
+      "deploy": {"startCommand": "alembic upgrade head && python -m app.main"}
+    },
+    {
+      "name": "telegram",
+      "variables": {"SERVICE_ROLE": "telegram"},
+      "deploy": {"startCommand": "alembic upgrade head && python -m app.main"}
+    }
+  ]
+}

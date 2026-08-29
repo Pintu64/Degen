@@ -12,13 +12,22 @@ AI is optional and is never required for scanning, scoring, alerts, or tracking.
 
 ## Railway deployment
 
-1. Push this repository to GitHub and create a Railway project.
-2. Add Railway PostgreSQL and Redis services.
-3. Create four services from the same repository: `bot`, `scanner`, `tracker`, and `telegram`.
-4. Set `SERVICE_ROLE` to the corresponding name on each service.
-5. Add the shared variables from `.env.example`. Railway's PostgreSQL URL may begin with `postgresql://`; it is converted automatically to the async driver URL.
-6. Set `TELEGRAM_BOT_TOKEN` and the numeric `OWNER_TELEGRAM_ID` on `bot` and `telegram`.
-7. Deploy. The start command runs `alembic upgrade head` before starting each process; migrations are idempotent.
+Use the included `railway-template.json` when creating the Railway project. It declares the four application services and links the database variables automatically:
+
+```text
+DATABASE_URL = ${{Postgres.DATABASE_URL}}
+REDIS_URL     = ${{Redis.REDIS_URL}}
+```
+
+After importing the template:
+
+1. Add Railway PostgreSQL using the service name `Postgres` and Redis using the service name `Redis`.
+2. Connect the repository to the four application services: `bot`, `scanner`, `tracker`, and `telegram`.
+3. Set `TELEGRAM_BOT_TOKEN` and numeric `OWNER_TELEGRAM_ID` on `bot` and `telegram`.
+4. Set `AI_API_KEY` only if you want GLM analysis through AgentRouter; AI remains harmlessly inactive without it.
+5. Deploy. Each service runs `alembic upgrade head` before starting; migrations are idempotent.
+
+Railway does not infer secrets from `.env.example`. Telegram and optional AI keys must remain manually entered as protected variables. Railway's PostgreSQL URL may begin with `postgresql://`; the application converts it to the async driver URL automatically.
 
 Do not expose multiple `bot` replicas because Telegram long polling permits one consumer. Scanner/tracker duplicate protection uses Redis cooldown locks and atomic PostgreSQL milestone claims.
 
