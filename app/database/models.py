@@ -105,3 +105,19 @@ class AuditCorrection(Base):
     proposed_value: Mapped[str] = mapped_column(Text)
     reason: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CoordKV(Base):
+    __tablename__ = "coord_kv"
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class CoordQueue(Base):
+    __tablename__ = "coord_queue"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    queue: Mapped[str] = mapped_column(String(64), index=True)
+    payload: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

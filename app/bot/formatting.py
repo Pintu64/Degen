@@ -406,7 +406,7 @@ def status_text(scanner: str, tracker: str, telegram: str, db: str, redis_status
             ('📡 Tracker', mark(tracker)),
             ('✉️ Telegram queue', mark(telegram)),
             ('🗄️ Database', mark(db)),
-            ('⚡ Redis', mark(redis_status)),
+            ('⚡ Locks / queue', mark(redis_status)),
             ('📌 Active calls', str(active)),
         )}\n\n"
         f"{chain_lines}"
@@ -723,7 +723,7 @@ def chains_text(enabled: tuple[str, ...] | list[str]) -> str:
     return glass_card(
         "🌐  Chains",
         "Official degen calls only fire on enabled chains.\nTap to toggle. At least one chain must stay on.\n\n" + "\n".join(lines),
-        kicker="live override · Redis",
+        kicker="live override · Postgres",
     )
 
 

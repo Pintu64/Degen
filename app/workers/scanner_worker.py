@@ -1,7 +1,6 @@
 import asyncio, json
 import logging
 from sqlalchemy.exc import IntegrityError
-from redis.asyncio import Redis
 from app.bot.formatting import alert_text, chart_url_for, recovery_alert_text
 from app.bot.keyboards import alert_buttons
 from app.config import Settings
@@ -23,8 +22,7 @@ from app.services.cache import Coordination
 async def run_scanner(settings: Settings):
     engine = create_engine(settings)
     sessions = create_session_factory(engine)
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
-    coord = Coordination(redis)
+    coord = Coordination(sessions)
     provider = DexScreenerProvider(settings)
     ranker = DegenRanker(settings)
     analyzer = AnalysisService(FilterEngine(settings), RiskAnalyzer(), ScoringEngine(settings), ranker, settings)
@@ -72,7 +70,7 @@ async def run_scanner(settings: Settings):
                     break
                 snap = analysis.snapshot
                 key = f"alert:{snap.chain.value}:{snap.contract_address}"
-                if await redis.exists(key):
+                if await coord.exists(key):
                     continue
                 async with sessions() as session:
                     if await Repository(session).has_active_call(snap.chain, snap.contract_address):
@@ -116,5 +114,4 @@ async def run_scanner(settings: Settings):
     finally:
         await ai.close()
         await provider.close()
-        await redis.aclose()
         await engine.dispose()

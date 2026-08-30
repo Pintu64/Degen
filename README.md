@@ -27,12 +27,13 @@ Use the included `railway-template.json` when creating the Railway project. It d
 
 ```text
 DATABASE_URL = ${{Postgres.DATABASE_URL}}
-REDIS_URL     = ${{Redis.REDIS_URL}}
 ```
+
+Redis is **not required**. Locks, heartbeats, chain toggles, and the Telegram outbound queue live in Postgres.
 
 After importing the template:
 
-1. Add Railway PostgreSQL using the service name `Postgres` and Redis using the service name `Redis`.
+1. Add Railway PostgreSQL using the service name `Postgres`. Redis is optional and unused.
 2. Connect this GitHub repo (`Pintu64/Degen`) to the four application services: `bot`, `scanner`, `tracker`, and `telegram`.
 3. Set these **shared** variables on every app service (or project-level):
    - `TELEGRAM_BOT_TOKEN`
@@ -75,7 +76,7 @@ Every handler requires both the configured numeric `from_user.id` and that owner
 - `tracker`: centralized active-call price refresh, anomaly checks, ATH and milestone claims
 - `telegram`: single outbound queue consumer for alerts and milestones
 - PostgreSQL: durable tokens, calls, milestones, snapshots, audit corrections
-- Redis: cooldown locks, service heartbeats, reliable FIFO outbound queue, and failed-message dead-letter queue
+- Postgres also stores cooldown locks, service heartbeats, chain toggles, and the outbound Telegram queue (no Redis required)
 
 ## Tests
 

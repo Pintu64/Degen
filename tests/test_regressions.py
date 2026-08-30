@@ -24,7 +24,6 @@ from app.database.repository import Repository
 from app.domain import Chain, RiskLevel
 from app.scanner.filters import FilterEngine
 from app.scanner.risk import RiskAnalyzer
-from app.services.cache import Coordination
 from app.workers.telegram_worker import _payload
 from app.workers.tracker_worker import _elapsed_text
 from tests.test_analysis import snapshot
@@ -118,35 +117,9 @@ def test_outbound_payload_validation():
         _payload(json.dumps({"text": "ok", "call_id": 1, "milestone_id": 2}))
 
 
-@pytest.mark.asyncio
-async def test_coordination_enqueues_fifo_compatible_side():
-    redis = AsyncMock()
-    await Coordination(redis).enqueue("queue", "payload")
-    redis.lpush.assert_awaited_once_with("queue", "payload")
-
-
-@pytest.mark.asyncio
-async def test_coordination_recovery_preserves_inflight_fifo_order():
-    class Pipeline:
-        def __init__(self):
-            self.calls = []
-        async def __aenter__(self):
-            return self
-        async def __aexit__(self, *args):
-            return False
-        def delete(self, queue):
-            self.calls.append(("delete", queue))
-        def rpush(self, queue, *payloads):
-            self.calls.append(("rpush", queue, payloads))
-        async def execute(self):
-            return []
-
-    redis = AsyncMock()
-    redis.lrange.return_value = ["newer", "older"]
-    pipeline = Pipeline()
-    redis.pipeline = MagicMock(return_value=pipeline)
-    await Coordination(redis).recover_processing("processing", "queue")
-    assert pipeline.calls == [("delete", "processing"), ("rpush", "queue", ("newer", "older"))]
+def test_settings_allow_missing_redis():
+    settings = Settings(_env_file=None, redis_url="")
+    assert settings.redis_url is None
 
 
 @pytest.mark.asyncio

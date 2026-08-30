@@ -9,7 +9,6 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
-from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -217,17 +216,15 @@ def owner_router(
                 db = "ONLINE"
         except Exception:
             logger.exception("BOT_DATABASE_STATUS_FAILED")
-        redis = Redis.from_url(settings.redis_url, decode_responses=True)
+        coord = Coordination(sessions)
         try:
-            await redis.ping()
+            await coord.ping()
             redis_status = "ONLINE"
-            scanner = "ONLINE" if await redis.exists("heartbeat:scanner") else "OFFLINE"
-            tracker = "ONLINE" if await redis.exists("heartbeat:tracker") else "OFFLINE"
-            telegram = "ONLINE" if await redis.exists("heartbeat:telegram") else "OFFLINE"
+            scanner = "ONLINE" if await coord.alive("scanner") else "OFFLINE"
+            tracker = "ONLINE" if await coord.alive("tracker") else "OFFLINE"
+            telegram = "ONLINE" if await coord.alive("telegram") else "OFFLINE"
         except Exception:
-            logger.exception("BOT_REDIS_STATUS_FAILED")
-        finally:
-            await redis.aclose()
+            logger.exception("BOT_COORD_STATUS_FAILED")
         return status_text(scanner, tracker, telegram, db, redis_status, active, settings.enabled_chains)
 
     async def show_status(message: Message) -> None:
@@ -268,11 +265,7 @@ def owner_router(
         cached = chains_memo[1]
         if cached is not None and now - float(chains_memo[0]) < 5:
             return list(cached)  # type: ignore[arg-type]
-        redis = Redis.from_url(settings.redis_url, decode_responses=True)
-        try:
-            names = await Coordination(redis).enabled_chains(settings.enabled_chains)
-        finally:
-            await redis.aclose()
+        names = await Coordination(sessions).enabled_chains(settings.enabled_chains)
         result = [Chain(name) for name in names]
         chains_memo[0] = now
         chains_memo[1] = result
@@ -710,20 +703,16 @@ def owner_router(
         if name not in {"solana", "ethereum", "bsc", "base"}:
             await query.answer("Unknown chain", show_alert=True)
             return
-        redis = Redis.from_url(settings.redis_url, decode_responses=True)
-        try:
-            coord = Coordination(redis)
-            current = list(await coord.enabled_chains(settings.enabled_chains))
-            if name in current:
-                if len(current) == 1:
-                    await query.answer("Keep at least one chain on.", show_alert=True)
-                    return
-                current.remove(name)
-            else:
-                current.append(name)
-            updated = await coord.set_enabled_chains(current)
-        finally:
-            await redis.aclose()
+        coord = Coordination(sessions)
+        current = list(await coord.enabled_chains(settings.enabled_chains))
+        if name in current:
+            if len(current) == 1:
+                await query.answer("Keep at least one chain on.", show_alert=True)
+                return
+            current.remove(name)
+        else:
+            current.append(name)
+        updated = await coord.set_enabled_chains(current)
         await query.answer(f"{name} {'on' if name in updated else 'off'}")
         await _edit(query, chains_text(updated), reply_markup=chains_inline(updated))
 

@@ -3,8 +3,6 @@ import json
 import logging
 from datetime import timedelta
 
-from redis.asyncio import Redis
-
 from app.bot.formatting import chart_url_for, elapsed_text, milestone_text
 from app.bot.keyboards import alert_buttons
 from app.config import Settings
@@ -39,8 +37,7 @@ def _milestone_payload(call, milestone, multiple, extra: str = "") -> str:
 async def run_tracker(settings: Settings):
     engine = create_engine(settings)
     sessions = create_session_factory(engine)
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
-    coord = Coordination(redis)
+    coord = Coordination(sessions)
     provider = DexScreenerProvider(settings)
     cycles = 0
     try:
@@ -130,5 +127,4 @@ async def run_tracker(settings: Settings):
             await asyncio.sleep(settings.tracking_interval_seconds)
     finally:
         await provider.close()
-        await redis.aclose()
         await engine.dispose()

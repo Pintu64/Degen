@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     owner_telegram_id: int = Field(0, ge=0)
     database_url: str = "postgresql+asyncpg://scanner:scanner@postgres:5432/scanner"
-    redis_url: str = "redis://redis:6379/0"
+    redis_url: str | None = None
     dexscreener_base_url: str = "https://api.dexscreener.com"
     solana_api_key: str | None = None
     ethereum_api_key: str | None = None
@@ -119,10 +119,13 @@ class Settings(BaseSettings):
 
     @field_validator("redis_url")
     @classmethod
-    def validate_redis_url(cls, value: str) -> str:
-        if not value.startswith(("redis://", "rediss://")):
+    def validate_redis_url(cls, value: str | None) -> str | None:
+        if value is None or str(value).strip() == "":
+            return None
+        cleaned = str(value).strip()
+        if not cleaned.startswith(("redis://", "rediss://")):
             raise ValueError("REDIS_URL must use redis:// or rediss://")
-        return value
+        return cleaned
 
     def validate_runtime(self, role: str) -> None:
         if role in {"bot", "telegram"} and (not self.telegram_bot_token or self.owner_telegram_id <= 0):

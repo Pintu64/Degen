@@ -6,7 +6,6 @@ from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError, TelegramRetryAfter
-from redis.asyncio import Redis
 
 from app.bot.keyboards import from_payload
 from app.config import Settings
@@ -20,22 +19,12 @@ DEAD_LETTER_QUEUE = "telegram:dead"
 MAX_ATTEMPTS = 5
 
 
-async def _replace(redis: Redis, queue: str, raw: str, new_raw: str) -> None:
-    async with redis.pipeline(transaction=True) as pipe:
-        pipe.lrem(queue, 1, raw)
-        pipe.lpush(queue, new_raw)
-        await pipe.execute()
-
-
-async def _retry(redis: Redis, raw: str, payload: dict, delay: float = 5) -> None:
+async def _retry(coord: Coordination, raw: str, payload: dict, delay: float = 5) -> None:
     attempts = int(payload.get("attempts", 0)) + 1
     payload["attempts"] = attempts
     target = DEAD_LETTER_QUEUE if attempts >= MAX_ATTEMPTS else OUTBOUND_QUEUE
     new_raw = json.dumps(payload)
-    async with redis.pipeline(transaction=True) as pipe:
-        pipe.lrem(PROCESSING_QUEUE, 1, raw)
-        pipe.lpush(target, new_raw)
-        await pipe.execute()
+    await coord.requeue(PROCESSING_QUEUE, target, raw, new_raw)
     if target == DEAD_LETTER_QUEUE:
         logging.error("TELEGRAM_MESSAGE_DEAD_LETTERED", extra={"kind": payload.get("kind")})
     else:
@@ -67,8 +56,7 @@ async def run_telegram_worker(settings: Settings):
     settings.validate_runtime("telegram")
     engine = create_engine(settings)
     sessions = create_session_factory(engine)
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
-    coordination = Coordination(redis)
+    coordination = Coordination(sessions)
     bot = Bot(
         settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -99,7 +87,7 @@ async def run_telegram_worker(settings: Settings):
                     message_id = message.message_id
                     payload["sent_message_id"] = message_id
                     persisted_raw = json.dumps(payload)
-                    await _replace(redis, PROCESSING_QUEUE, raw, persisted_raw)
+                    await coordination.replace(PROCESSING_QUEUE, raw, persisted_raw)
                     raw = persisted_raw
 
                 async with sessions() as session:
@@ -110,18 +98,17 @@ async def run_telegram_worker(settings: Settings):
                         await repo.mark_call_alert_sent(int(payload["call_id"]), message_id)
                 await coordination.acknowledge(PROCESSING_QUEUE, raw)
             except TelegramRetryAfter as exc:
-                await _retry(redis, raw, payload, float(exc.retry_after))
+                await _retry(coordination, raw, payload, float(exc.retry_after))
             except TelegramNetworkError:
                 logging.exception("TELEGRAM_NETWORK_ERROR")
-                await _retry(redis, raw, payload)
+                await _retry(coordination, raw, payload)
             except TelegramAPIError:
                 logging.exception("TELEGRAM_API_ERROR")
                 payload["attempts"] = MAX_ATTEMPTS - 1
-                await _retry(redis, raw, payload, 0)
+                await _retry(coordination, raw, payload, 0)
             except Exception:
                 logging.exception("TELEGRAM_DELIVERY_ERROR")
-                await _retry(redis, raw, payload)
+                await _retry(coordination, raw, payload)
     finally:
         await bot.session.close()
-        await redis.aclose()
         await engine.dispose()

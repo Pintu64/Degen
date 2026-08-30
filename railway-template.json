@@ -3,7 +3,6 @@
   "variables": {
     "APP_ENV": "production",
     "DATABASE_URL": "${{Postgres.DATABASE_URL}}",
-    "REDIS_URL": "${{Redis.REDIS_URL}}",
     "DEXSCREENER_BASE_URL": "https://api.dexscreener.com",
     "AI_ENABLED": "true",
     "AI_BASE_URL": "https://agentrouter.org/v1",
