@@ -23,7 +23,7 @@
     {
       "name": "bot",
       "variables": {"SERVICE_ROLE": "bot"},
-      "deploy": {"startCommand": "alembic upgrade head && python -m app.main", "healthcheckPath": "/health"}
+      "deploy": {"startCommand": "alembic upgrade head && python -m app.main"}
     },
     {
       "name": "scanner",

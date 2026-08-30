@@ -13,18 +13,26 @@ class Repository:
     async def upsert_token(self,s:TokenSnapshot)->Token:
         stmt=insert(Token).values(chain=s.chain.value,contract_address=s.contract_address,name=s.name,symbol=s.symbol).on_conflict_do_update(constraint="uq_token_chain_address",set_={"name":s.name,"symbol":s.symbol,"updated_at":func.now()}).returning(Token.id)
         token_id=(await self.session.execute(stmt)).scalar_one(); return await self.session.get(Token,token_id)
-    async def create_call(self,a:CandidateAnalysis,milestones:tuple[Decimal,...])->Call:
+    async def create_call(self,a:CandidateAnalysis,milestones:tuple[Decimal,...],alert_message_id:int|None=None)->Call:
         s=a.snapshot
-        if s.price is None or s.price<=0: raise ValueError("A valid reference price is required")
-        token=await self.upsert_token(s); call=Call(token_id=token.id,reference_price=s.price,reference_timestamp=s.timestamp,initial_market_cap=s.market_cap,initial_liquidity=s.liquidity,initial_volume=s.volume_24h,initial_score=a.score.score,initial_risk=a.risk.level.value,initial_snapshot=s.model_dump(mode="json"),status="ACTIVE",current_price=s.price,current_multiple=Decimal("1"),highest_price=s.price,highest_multiple=Decimal("1"),highest_timestamp=s.timestamp)
+        if s.price is None or not s.price.is_finite() or s.price<=0: raise ValueError("A valid reference price is required")
+        token=await self.upsert_token(s); await self.save_token_snapshot(token.id,s)
+        call=Call(token_id=token.id,reference_price=s.price,reference_timestamp=s.timestamp,initial_market_cap=s.market_cap,initial_liquidity=s.liquidity,initial_volume=s.volume_24h,initial_score=a.score.score,initial_risk=a.risk.level.value,initial_snapshot=s.model_dump(mode="json"),status="ACTIVE",current_price=s.price,current_multiple=Decimal("1"),highest_price=s.price,highest_multiple=Decimal("1"),highest_timestamp=s.timestamp,alert_message_id=alert_message_id)
         self.session.add(call); await self.session.flush()
-        self.session.add_all([Milestone(call_id=call.id,target_multiple=m,target_price=s.price*m,status="PENDING") for m in milestones]); await self.session.commit(); return call
+        self.session.add_all([Milestone(call_id=call.id,target_multiple=m,target_price=s.price*m,status="PENDING") for m in milestones]); await self.session.commit()
+        created=await self.get_call(call.id)
+        if created is None: raise RuntimeError("Created call could not be reloaded")
+        return created
     async def active_calls(self)->list[Call]:
         result=await self.session.execute(select(Call).where(Call.status=="ACTIVE").options(selectinload(Call.token),selectinload(Call.milestones)).order_by(Call.id)); return list(result.scalars().unique())
     async def call_history(self,limit:int=50)->list[Call]:
         result=await self.session.execute(select(Call).options(selectinload(Call.token)).order_by(Call.created_at.desc()).limit(limit)); return list(result.scalars().unique())
     async def get_call(self,call_id:int)->Call|None:
         result=await self.session.execute(select(Call).where(Call.id==call_id).options(selectinload(Call.token),selectinload(Call.milestones))); return result.scalar_one_or_none()
+    async def close_call(self,call_id:int)->Call|None:
+        result=await self.session.execute(update(Call).where(Call.id==call_id,Call.status=="ACTIVE").values(status="CLOSED",updated_at=func.now()).returning(Call.id))
+        closed_id=result.scalar_one_or_none(); await self.session.commit()
+        return await self.get_call(closed_id) if closed_id is not None else None
     async def has_active_call(self,chain:Chain,address:str)->bool:
         q=select(func.count()).select_from(Call).join(Token).where(Token.chain==chain.value,Token.contract_address==address,Call.status=="ACTIVE"); return (await self.session.scalar(q) or 0)>0
     async def save_token_snapshot(self,token_id:int,s:TokenSnapshot): self.session.add(TokenSnapshotRecord(token_id=token_id,timestamp=s.timestamp,provider=s.provider,payload=s.model_dump(mode="json")))
@@ -48,7 +56,7 @@ class Repository:
         result=await self.session.execute(select(Milestone).where(Milestone.status=="HIT",Milestone.telegram_message_id.is_(None)).options(selectinload(Milestone.call).selectinload(Call.token)))
         return list(result.scalars().unique())
     async def unsent_call_alerts(self)->list[Call]:
-        result=await self.session.execute(select(Call).where(Call.alert_message_id.is_(None)).options(selectinload(Call.token)).order_by(Call.id))
+        result=await self.session.execute(select(Call).where(Call.status=="ACTIVE",Call.alert_message_id.is_(None)).options(selectinload(Call.token)).order_by(Call.id))
         return list(result.scalars().unique())
     async def cleanup_snapshots(self,days:int)->int:
         result=await self.session.execute(delete(PriceSnapshot).where(PriceSnapshot.timestamp<datetime.now(UTC)-timedelta(days=days))); await self.session.commit(); return result.rowcount or 0

@@ -15,6 +15,13 @@ class RiskAnalyzer:
             elif not s.contract_verified: risks.append("Contract not verified")
             if s.buy_tax is None or s.sell_tax is None: missing.append("tax data")
         risks.extend(s.suspicious_flags)
-        level=RiskLevel.HIGH if len(risks)>=2 else RiskLevel.MEDIUM if risks else RiskLevel.UNKNOWN if missing else RiskLevel.LOWER
+        if len(risks) >= 2:
+            level = RiskLevel.HIGH
+        elif risks:
+            level = RiskLevel.MEDIUM if not missing else RiskLevel.HIGH
+        elif missing:
+            level = RiskLevel.UNKNOWN
+        else:
+            level = RiskLevel.LOWER
         if s.liquidity is not None: positive.append("Liquidity reported by provider")
         return RiskAssessment(level=level,positive_signals=positive,risk_signals=risks,missing_information=missing)

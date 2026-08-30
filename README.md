@@ -25,7 +25,7 @@ After importing the template:
 2. Connect the repository to the four application services: `bot`, `scanner`, `tracker`, and `telegram`.
 3. Set `TELEGRAM_BOT_TOKEN` and numeric `OWNER_TELEGRAM_ID` on `bot` and `telegram`.
 4. Set `AI_API_KEY` only if you want GLM analysis through AgentRouter; AI remains harmlessly inactive without it.
-5. Deploy. Each service runs `alembic upgrade head` before starting; migrations are idempotent.
+5. Deploy. Each service runs `alembic upgrade head` before starting; a PostgreSQL advisory lock serializes concurrent migration attempts.
 
 Railway does not infer secrets from `.env.example`. Telegram and optional AI keys must remain manually entered as protected variables. Railway's PostgreSQL URL may begin with `postgresql://`; the application converts it to the async driver URL automatically.
 
@@ -42,9 +42,11 @@ Set the real Telegram token and numeric owner ID in `.env` first. No private key
 
 ## Commands
 
-`/start`, `/help`, `/status`, `/active`, `/history`, `/stats`, `/call <id>`, `/scan`, `/scan sol`, `/scan eth`, `/scan bsc`, `/settings`.
+`/start`, `/help`, `/status`, `/active`, `/history`, `/stats`, `/call <id>`, `/close <id>`, `/scan`, `/scan sol`, `/scan eth`, `/scan bsc`, `/settings`.
 
-Every handler is protected by a numeric `from_user.id` check. Other users receive no bot functionality.
+The persistent reply keyboard and inline controls provide the same scan, track, refresh, close, chart, history, status, and settings flows without requiring commands.
+
+Every handler requires both the configured numeric `from_user.id` and that owner's private chat. Group/channel use and other users receive no bot functionality.
 
 ## Architecture
 
@@ -53,7 +55,7 @@ Every handler is protected by a numeric `from_user.id` check. Other users receiv
 - `tracker`: centralized active-call price refresh, anomaly checks, ATH and milestone claims
 - `telegram`: single outbound queue consumer for alerts and milestones
 - PostgreSQL: durable tokens, calls, milestones, snapshots, audit corrections
-- Redis: cooldown locks and outbound queue
+- Redis: cooldown locks, service heartbeats, reliable FIFO outbound queue, and failed-message dead-letter queue
 
 ## Tests
 

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     app_env: str = "production"
     service_role: str = "bot"
     telegram_bot_token: str = ""
-    owner_telegram_id: int = 0
+    owner_telegram_id: int = Field(0, ge=0)
     database_url: str = "postgresql+asyncpg://scanner:scanner@postgres:5432/scanner"
     redis_url: str = "redis://redis:6379/0"
     dexscreener_base_url: str = "https://api.dexscreener.com"
@@ -30,22 +30,22 @@ class Settings(BaseSettings):
     tracking_interval_seconds: int = Field(30, ge=10)
     scan_interval_seconds: int = Field(30, ge=10)
     snapshot_retention_days: int = Field(30, ge=1)
-    min_liquidity_usd: Decimal = Decimal("25000")
-    min_volume_24h_usd: Decimal = Decimal("50000")
-    min_txns_24h: int = 100
+    min_liquidity_usd: Decimal = Field(Decimal("25000"), ge=0)
+    min_volume_24h_usd: Decimal = Field(Decimal("50000"), ge=0)
+    min_txns_24h: int = Field(100, ge=0)
     min_score: int = Field(70, ge=0, le=100)
-    max_top_holder_percent: Decimal = Decimal("35")
-    min_data_quality: Decimal = Decimal("0.55")
-    max_data_age_seconds: int = 180
-    max_provider_price_deviation_percent: Decimal = Decimal("25")
-    max_price_jump_multiple: Decimal = Decimal("100")
-    token_cooldown_seconds: int = 21600
-    alert_cooldown_seconds: int = 60
-    minimum_score_change: int = 5
-    watch_score: int = 60
-    interesting_score: int = 70
-    strong_score: int = 80
-    extreme_score: int = 90
+    max_top_holder_percent: Decimal = Field(Decimal("35"), ge=0, le=100)
+    min_data_quality: Decimal = Field(Decimal("0.55"), ge=0, le=1)
+    max_data_age_seconds: int = Field(180, ge=1)
+    max_provider_price_deviation_percent: Decimal = Field(Decimal("25"), ge=0)
+    max_price_jump_multiple: Decimal = Field(Decimal("100"), gt=1)
+    token_cooldown_seconds: int = Field(21600, ge=1)
+    alert_cooldown_seconds: int = Field(60, ge=1)
+    minimum_score_change: int = Field(5, ge=0, le=100)
+    watch_score: int = Field(60, ge=0, le=100)
+    interesting_score: int = Field(70, ge=0, le=100)
+    strong_score: int = Field(80, ge=0, le=100)
+    extreme_score: int = Field(90, ge=0, le=100)
     default_milestones: Annotated[tuple[Decimal, ...], NoDecode] = (
         Decimal("1.25"), Decimal("1.5"), Decimal("2"), Decimal("3"),
         Decimal("5"), Decimal("10"), Decimal("20"), Decimal("50"),
@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     @classmethod
     def validate_chains(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         normalized = tuple(item.lower() for item in value)
+        if not normalized:
+            raise ValueError("ENABLED_CHAINS must contain at least one chain")
         invalid = set(normalized) - {"solana", "ethereum", "bsc"}
         if invalid:
             raise ValueError(f"Unsupported chains: {', '.join(sorted(invalid))}")
@@ -93,10 +95,19 @@ class Settings(BaseSettings):
             return value.replace("postgres://", "postgresql+asyncpg://", 1)
         if value.startswith("postgresql://"):
             return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if not value.startswith("postgresql+asyncpg://"):
+            raise ValueError("DATABASE_URL must be a PostgreSQL URL")
+        return value
+
+    @field_validator("redis_url")
+    @classmethod
+    def validate_redis_url(cls, value: str) -> str:
+        if not value.startswith(("redis://", "rediss://")):
+            raise ValueError("REDIS_URL must use redis:// or rediss://")
         return value
 
     def validate_runtime(self, role: str) -> None:
-        if role in {"bot", "telegram"} and (not self.telegram_bot_token or not self.owner_telegram_id):
+        if role in {"bot", "telegram"} and (not self.telegram_bot_token or self.owner_telegram_id <= 0):
             raise ValueError("TELEGRAM_BOT_TOKEN and OWNER_TELEGRAM_ID are required for the bot service")
 
 

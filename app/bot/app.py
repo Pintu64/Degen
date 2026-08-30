@@ -1,7 +1,6 @@
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from redis.asyncio import Redis
 from app.bot.handlers import owner_router
 from app.config import Settings
 from app.database.session import create_engine, create_session_factory

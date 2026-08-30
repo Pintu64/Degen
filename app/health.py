@@ -14,4 +14,4 @@ async def health(_):
     finally: await redis.aclose(); await engine.dispose()
 
 app=web.Application(); app.router.add_get("/health",health)
-if __name__=="__main__": web.run_app(app,port=int(os.getenv("PORT","8080")))
+if __name__=="__main__": web.run_app(app,port=int(os.getenv("PORT",str(get_settings().web_port))))

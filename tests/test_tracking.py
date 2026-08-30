@@ -14,3 +14,6 @@ def test_invalid_prices(price):
 def test_stale_price():
     with pytest.raises(InvalidPrice): validate_price(Decimal("1"),datetime.now(UTC)-timedelta(seconds=181),180)
 def test_anomaly(): assert is_anomalous(Decimal("0.001"),Decimal("1000"),Decimal("100"))
+@pytest.mark.parametrize("reference,current",[(Decimal("NaN"),Decimal("1")),(Decimal("1"),Decimal("Infinity")),(Decimal("1"),Decimal("0"))])
+def test_multiple_rejects_non_finite_or_zero_values(reference,current):
+    with pytest.raises(InvalidPrice): calculate_multiple(reference,current)

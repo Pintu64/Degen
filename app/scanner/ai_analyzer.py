@@ -21,6 +21,10 @@ class AIAnalyzer:
     def _disable_temporarily(self)->None:
         self._disabled_until=monotonic()+self.settings.ai_failure_cooldown_seconds
 
+    async def close(self)->None:
+        if self.client is not None:
+            await self.client.close()
+
     async def analyze(self,analysis:CandidateAnalysis)->str|None:
         if not self.available:return None
         try:

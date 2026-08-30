@@ -10,7 +10,8 @@ def validate_price(price: Decimal, timestamp: datetime, max_age_seconds: int, no
     if (now-timestamp).total_seconds()>max_age_seconds: raise InvalidPrice("Price is stale")
 
 def calculate_multiple(reference:Decimal,current:Decimal)->Decimal:
-    if reference<=0: raise InvalidPrice("Reference price must be positive")
+    if not reference.is_finite() or reference<=0: raise InvalidPrice("Reference price must be positive and finite")
+    if not current.is_finite() or current<=0: raise InvalidPrice("Current price must be positive and finite")
     return current/reference
 
 def calculate_drawdown(ath_multiple:Decimal,current_multiple:Decimal)->Decimal:
@@ -20,4 +21,6 @@ def calculate_drawdown(ath_multiple:Decimal,current_multiple:Decimal)->Decimal:
 def crossed(previous:Decimal,current:Decimal,target:Decimal)->bool: return previous<target<=current
 
 def is_anomalous(previous:Decimal,current:Decimal,max_jump:Decimal)->bool:
+    if not previous.is_finite() or not current.is_finite() or not max_jump.is_finite() or current<=0 or max_jump<=1:
+        return True
     return previous>0 and (current/previous>max_jump or previous/current>max_jump)

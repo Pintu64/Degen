@@ -2,7 +2,8 @@ import asyncio, json
 import logging
 from sqlalchemy.exc import IntegrityError
 from redis.asyncio import Redis
-from app.bot.formatting import alert_text
+from app.bot.formatting import alert_text, chart_url_for, recovery_alert_text
+from app.bot.keyboards import alert_buttons
 from app.config import Settings
 from app.database.repository import Repository
 from app.database.session import create_engine, create_session_factory
@@ -24,8 +25,8 @@ async def run_scanner(settings:Settings):
             async with sessions() as session: unsent_calls=await Repository(session).unsent_call_alerts()
             for unsent in unsent_calls:
                 if await coord.acquire(f"call-notify:{unsent.id}",300):
-                    text=f"<b>MARKET ALERT</b>\n\n<b>${unsent.token.symbol or 'UNKNOWN'}</b> | {unsent.token.chain.upper()}\nCall #{unsent.id}\n\nReference price: ${unsent.reference_price}\nInitial score: {unsent.initial_score}/100\nRisk: {unsent.initial_risk}\n\nTracking is active. Research and paper-tracking alert; this does not guarantee future performance."
-                    await coord.enqueue("telegram:outbound",json.dumps({"kind":"alert","text":text,"call_id":unsent.id}))
+                    chart=chart_url_for(None,unsent.token.chain,unsent.token.contract_address)
+                    await coord.enqueue("telegram:outbound",json.dumps({"kind":"alert","text":recovery_alert_text(unsent),"call_id":unsent.id,"buttons":alert_buttons(unsent.id,chart)}))
             for chain_name in settings.enabled_chains:
                 chain=Chain(chain_name)
                 try: snapshots=await provider.discover_tokens(chain)
@@ -45,7 +46,11 @@ async def run_scanner(settings:Settings):
                             call=await repo.create_call(analysis,settings.default_milestones)
                     except IntegrityError:
                         continue
+                    except Exception:
+                        await coord.release(key)
+                        logging.exception("CALL_CREATE_ERROR",extra={"chain":chain.value,"address":snap.contract_address})
+                        continue
                     if await coord.acquire(f"call-notify:{call.id}",300):
-                        await coord.enqueue("telegram:outbound",json.dumps({"kind":"alert","text":alert_text(analysis,call.id),"call_id":call.id}))
+                        await coord.enqueue("telegram:outbound",json.dumps({"kind":"alert","text":alert_text(analysis,call.id),"call_id":call.id,"buttons":alert_buttons(call.id,chart_url_for(snap))}))
             await asyncio.sleep(settings.scan_interval_seconds)
-    finally: await provider.close(); await redis.aclose(); await engine.dispose()
+    finally: await ai.close(); await provider.close(); await redis.aclose(); await engine.dispose()
