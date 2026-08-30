@@ -13,11 +13,17 @@ class Repository:
     async def upsert_token(self,s:TokenSnapshot)->Token:
         stmt=insert(Token).values(chain=s.chain.value,contract_address=s.contract_address,name=s.name,symbol=s.symbol).on_conflict_do_update(constraint="uq_token_chain_address",set_={"name":s.name,"symbol":s.symbol,"updated_at":func.now()}).returning(Token.id)
         token_id=(await self.session.execute(stmt)).scalar_one(); return await self.session.get(Token,token_id)
-    async def create_call(self,a:CandidateAnalysis,milestones:tuple[Decimal,...],alert_message_id:int|None=None)->Call:
+    async def create_call(self,a:CandidateAnalysis,milestones:tuple[Decimal,...],alert_message_id:int|None=None,source:str="OFFICIAL")->Call:
         s=a.snapshot
         if s.price is None or not s.price.is_finite() or s.price<=0: raise ValueError("A valid reference price is required")
         token=await self.upsert_token(s); await self.save_token_snapshot(token.id,s)
-        call=Call(token_id=token.id,reference_price=s.price,reference_timestamp=s.timestamp,initial_market_cap=s.market_cap,initial_liquidity=s.liquidity,initial_volume=s.volume_24h,initial_score=a.score.score,initial_risk=a.risk.level.value,initial_snapshot=s.model_dump(mode="json"),status="ACTIVE",current_price=s.price,current_multiple=Decimal("1"),highest_price=s.price,highest_multiple=Decimal("1"),highest_timestamp=s.timestamp,alert_message_id=alert_message_id)
+        payload=s.model_dump(mode="json")
+        if a.coin_scan is not None:
+            payload["coin_scan"]=a.coin_scan.model_dump(mode="json")
+        if a.deep_risk is not None:
+            payload["deep_risk"]=a.deep_risk.model_dump(mode="json")
+            payload["alpha"]=a.alpha
+        call=Call(token_id=token.id,reference_price=s.price,reference_timestamp=s.timestamp,initial_market_cap=s.market_cap,initial_liquidity=s.liquidity,initial_volume=s.volume_24h,initial_score=a.degen_score or a.score.score,initial_risk=a.risk.level.value,initial_snapshot=payload,status="ACTIVE",current_price=s.price,current_multiple=Decimal("1"),highest_price=s.price,highest_multiple=Decimal("1"),highest_timestamp=s.timestamp,alert_message_id=alert_message_id,source=source)
         self.session.add(call); await self.session.flush()
         self.session.add_all([Milestone(call_id=call.id,target_multiple=m,target_price=s.price*m,status="PENDING") for m in milestones]); await self.session.commit()
         created=await self.get_call(call.id)
@@ -35,6 +41,26 @@ class Repository:
         return await self.get_call(closed_id) if closed_id is not None else None
     async def has_active_call(self,chain:Chain,address:str)->bool:
         q=select(func.count()).select_from(Call).join(Token).where(Token.chain==chain.value,Token.contract_address==address,Call.status=="ACTIVE"); return (await self.session.scalar(q) or 0)>0
+    async def calls_for_contract(self, address: str) -> list[Call]:
+        lowered = address.strip().lower()
+        result = await self.session.execute(
+            select(Call)
+            .join(Token)
+            .where(func.lower(Token.contract_address) == lowered)
+            .options(selectinload(Call.token), selectinload(Call.milestones))
+            .order_by(Call.created_at.desc())
+        )
+        return list(result.scalars().unique())
+    async def price_history(self, call_id: int, limit: int = 40) -> list[PriceSnapshot]:
+        result = await self.session.execute(
+            select(PriceSnapshot)
+            .where(PriceSnapshot.call_id == call_id)
+            .order_by(PriceSnapshot.timestamp.desc())
+            .limit(limit)
+        )
+        rows = list(result.scalars())
+        rows.reverse()
+        return rows
     async def save_token_snapshot(self,token_id:int,s:TokenSnapshot): self.session.add(TokenSnapshotRecord(token_id=token_id,timestamp=s.timestamp,provider=s.provider,payload=s.model_dump(mode="json")))
     async def update_tracking(self,call:Call,s:TokenSnapshot,multiple:Decimal)->list[Milestone]:
         now=s.timestamp; new_high=multiple>call.highest_multiple
@@ -67,4 +93,10 @@ class Repository:
         elif len(sorted_aths)%2: median=sorted_aths[len(sorted_aths)//2]
         else:
             middle=len(sorted_aths)//2; median=(sorted_aths[middle-1]+sorted_aths[middle])/Decimal("2")
-        return {"total":len(calls),"active":sum(c.status=="ACTIVE" for c in calls),"closed":sum(c.status!="ACTIVE" for c in calls),"average_ath":sum(aths,Decimal("0"))/len(aths) if aths else Decimal("0"),"median_ath":median,"maximum_ath":max(aths,default=Decimal("0")),"below_1x":sum(c.current_multiple<1 for c in calls),"above_1x":sum(c.current_multiple>=1 for c in calls),"milestones":{str(t):sum(m.status=="HIT" and m.target_multiple==t for m in milestones) for t in sorted({m.target_multiple for m in milestones})}}
+        total=len(calls)
+        def pct(count:int) -> str:
+            return f"{(Decimal(count)/Decimal(total)*Decimal('100')):.0f}" if total else "0"
+        hit_50=sum(c.highest_multiple>=Decimal("1.5") for c in calls)
+        hit_2x=sum(c.highest_multiple>=Decimal("2") for c in calls)
+        hit_5x=sum(c.highest_multiple>=Decimal("5") for c in calls)
+        return {"total":total,"active":sum(c.status=="ACTIVE" for c in calls),"closed":sum(c.status!="ACTIVE" for c in calls),"average_ath":sum(aths,Decimal("0"))/len(aths) if aths else Decimal("0"),"median_ath":median,"maximum_ath":max(aths,default=Decimal("0")),"below_1x":sum(c.current_multiple<1 for c in calls),"above_1x":sum(c.current_multiple>=1 for c in calls),"hit_50":hit_50,"hit_2x":hit_2x,"hit_5x":hit_5x,"hit_50_pct":pct(hit_50),"hit_2x_pct":pct(hit_2x),"hit_5x_pct":pct(hit_5x),"milestones":{str(t):sum(m.status=="HIT" and m.target_multiple==t for m in milestones) for t in sorted({m.target_multiple for m in milestones})}}

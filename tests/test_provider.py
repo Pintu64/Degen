@@ -33,8 +33,10 @@ def test_decimal_parser_rejects_invalid_values(value):
 def test_contract_validation_is_chain_specific():
     assert valid_contract_address(Chain.ETHEREUM, ETH_ADDRESS)
     assert valid_contract_address(Chain.BSC, ETH_ADDRESS)
+    assert valid_contract_address(Chain.BASE, ETH_ADDRESS)
     assert valid_contract_address(Chain.SOLANA, SOL_ADDRESS)
     assert not valid_contract_address(Chain.ETHEREUM, SOL_ADDRESS)
+    assert not valid_contract_address(Chain.BASE, SOL_ADDRESS)
     assert not valid_contract_address(Chain.SOLANA, "normal message")
 
 

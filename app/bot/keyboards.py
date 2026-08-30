@@ -2,13 +2,25 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 
+from app.bot.charts import gmgn_url, rugcheck_url
 from app.domain import CandidateAnalysis, Chain
 
-CHAIN_SHORT = {Chain.SOLANA: "sol", Chain.ETHEREUM: "eth", Chain.BSC: "bsc"}
+CHAIN_SHORT = {Chain.SOLANA: "sol", Chain.ETHEREUM: "eth", Chain.BSC: "bsc", Chain.BASE: "base"}
 SHORT_CHAIN = {value: key for key, value in CHAIN_SHORT.items()}
 
 NAV_LABELS = {
+    "🔎 Scan": "scan",
+    "🎯 Best": "best",
+    "🔬 Check": "check",
+    "📡 Status": "status",
+    "📌 Active": "active",
+    "📚 History": "history",
+    "📊 Stats": "stats",
+    "⚙️ Settings": "settings",
+    "❓ Help": "help",
     "Scan": "scan",
+    "Best": "best",
+    "Check": "check",
     "Status": "status",
     "Active": "active",
     "History": "history",
@@ -18,13 +30,24 @@ NAV_LABELS = {
 }
 
 
+def _btn(text: str, callback: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=callback)
+
+
+def _back_row(*extra: InlineKeyboardButton, back: str = "nav:home") -> list[InlineKeyboardButton]:
+    row = [_btn("⬅️ Back", back)]
+    row.extend(extra)
+    return row
+
+
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Scan"), KeyboardButton(text="Status")],
-            [KeyboardButton(text="Active"), KeyboardButton(text="History")],
-            [KeyboardButton(text="Stats"), KeyboardButton(text="Settings")],
-            [KeyboardButton(text="Help")],
+            [KeyboardButton(text="🎯 Best"), KeyboardButton(text="🔬 Check")],
+            [KeyboardButton(text="🔎 Scan"), KeyboardButton(text="📡 Status")],
+            [KeyboardButton(text="📌 Active"), KeyboardButton(text="📚 History")],
+            [KeyboardButton(text="📊 Stats"), KeyboardButton(text="⚙️ Settings")],
+            [KeyboardButton(text="❓ Help")],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -34,133 +57,187 @@ def main_reply_keyboard() -> ReplyKeyboardMarkup:
 def home_inline() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Scan all", callback_data="scan:all"),
-            InlineKeyboardButton(text="Status", callback_data="nav:status"),
+            _btn("🏆 Best degen", "scan:best"),
+            _btn("🔬 Check CA", "nav:check"),
         ],
         [
-            InlineKeyboardButton(text="Solana", callback_data="scan:sol"),
-            InlineKeyboardButton(text="Ethereum", callback_data="scan:eth"),
-            InlineKeyboardButton(text="BNB", callback_data="scan:bsc"),
+            _btn("🌐 Scan all", "scan:all"),
         ],
         [
-            InlineKeyboardButton(text="Active", callback_data="nav:active"),
-            InlineKeyboardButton(text="History", callback_data="nav:history"),
+            _btn("🟣 Solana", "scan:sol"),
+            _btn("💠 Ethereum", "scan:eth"),
         ],
         [
-            InlineKeyboardButton(text="Stats", callback_data="nav:stats"),
-            InlineKeyboardButton(text="Settings", callback_data="nav:settings"),
+            _btn("🟡 BNB", "scan:bsc"),
+            _btn("🔵 Base", "scan:base"),
+        ],
+        [
+            _btn("📌 Active", "nav:active"),
+            _btn("📚 History", "nav:history"),
+        ],
+        [
+            _btn("📊 Stats", "nav:stats"),
+            _btn("🌐 Chains", "nav:chains"),
+        ],
+        [
+            _btn("⚙️ Settings", "nav:settings"),
         ],
     ])
 
 
 def scan_inline() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("🏆 Best degen", "scan:best"), _btn("🌐 All chains", "scan:all")],
         [
-            InlineKeyboardButton(text="All chains", callback_data="scan:all"),
+            _btn("🟣 Solana", "scan:sol"),
+            _btn("💠 Ethereum", "scan:eth"),
         ],
         [
-            InlineKeyboardButton(text="Solana", callback_data="scan:sol"),
-            InlineKeyboardButton(text="Ethereum", callback_data="scan:eth"),
-            InlineKeyboardButton(text="BNB", callback_data="scan:bsc"),
+            _btn("🟡 BNB", "scan:bsc"),
+            _btn("🔵 Base", "scan:base"),
         ],
-        [InlineKeyboardButton(text="Home", callback_data="nav:home")],
+        _back_row(),
     ])
 
 
 def back_home() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Scan", callback_data="scan:all"),
-            InlineKeyboardButton(text="Active", callback_data="nav:active"),
-            InlineKeyboardButton(text="Home", callback_data="nav:home"),
-        ]
+        _back_row(_btn("🔎 Scan", "nav:scan"), _btn("📌 Active", "nav:active")),
     ])
+
+
+def status_inline() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("🔄 Refresh", "nav:status")],
+        _back_row(),
+    ])
+
+
+def stats_inline() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("🔄 Refresh", "nav:stats")],
+        _back_row(),
+    ])
+
+
+def chains_inline(enabled: tuple[str, ...] | list[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for chain, label in (
+        (Chain.SOLANA, "🟣 Solana"),
+        (Chain.BASE, "🔵 Base"),
+        (Chain.ETHEREUM, "💠 Ethereum"),
+        (Chain.BSC, "🟡 BNB"),
+    ):
+        mark = "✅" if chain.value in enabled else "⚪️"
+        rows.append([_btn(f"{mark} {label}", f"chain:{chain.value}")])
+    rows.append(_back_row())
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def settings_inline() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Refresh", callback_data="nav:settings")],
-        [InlineKeyboardButton(text="Home", callback_data="nav:home")],
+        [_btn("🔄 Refresh", "nav:settings")],
+        _back_row(),
     ])
 
 
-def scan_results_inline(candidates: list[CandidateAnalysis]) -> InlineKeyboardMarkup:
+def scan_results_inline(candidates: list[CandidateAnalysis], scan_key: str = "all") -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for index, analysis in enumerate(candidates[:8], 1):
         snapshot = analysis.snapshot
         short = CHAIN_SHORT[snapshot.chain]
         symbol = (snapshot.symbol or "TOKEN")[:12]
-        rows.append([InlineKeyboardButton(
-            text=f"{index}. ${symbol} {analysis.score.score}/100",
-            callback_data=f"v:{short}:{snapshot.contract_address}",
+        crown = "🏆 " if index == 1 else ""
+        rows.append([_btn(
+            f"{crown}{index}. ${symbol} · {analysis.degen_score}",
+            f"v:{short}:{snapshot.contract_address}",
         )])
-    rows.append([
-        InlineKeyboardButton(text="Rescan", callback_data="scan:all"),
-        InlineKeyboardButton(text="Home", callback_data="nav:home"),
-    ])
+    rows.append(_back_row(_btn("🔄 Rescan", f"scan:{scan_key}"), back="nav:scan"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def token_inline(chain: Chain, address: str, chart_url: str | None = None, explorer_url: str | None = None) -> InlineKeyboardMarkup:
+def _trade_row(chain: Chain, address: str, pair_address: str | None = None) -> list[InlineKeyboardButton]:
+    dex = f"https://dexscreener.com/{chain.value}/{pair_address or address}"
+    return [
+        InlineKeyboardButton(text="📈 DEX", url=dex),
+        InlineKeyboardButton(text="🧬 GMGN", url=gmgn_url(chain, address)),
+        InlineKeyboardButton(text="🛡 SAFETY", url=rugcheck_url(chain, address)),
+    ]
+
+
+def token_inline(
+    chain: Chain,
+    address: str,
+    chart_url: str | None = None,
+    explorer_url: str | None = None,
+    back: str = "nav:scan",
+    pair_address: str | None = None,
+) -> InlineKeyboardMarkup:
     short = CHAIN_SHORT[chain]
-    rows: list[list[InlineKeyboardButton]] = [[
-        InlineKeyboardButton(text="Track", callback_data=f"t:{short}:{address}"),
-        InlineKeyboardButton(text="Refresh", callback_data=f"v:{short}:{address}"),
-    ]]
-    links: list[InlineKeyboardButton] = []
-    if chart_url:
-        links.append(InlineKeyboardButton(text="Chart", url=str(chart_url)))
-    if explorer_url:
-        links.append(InlineKeyboardButton(text="Explorer", url=explorer_url))
-    if links:
-        rows.append(links)
-    rows.append([
-        InlineKeyboardButton(text="Scan", callback_data="scan:all"),
-        InlineKeyboardButton(text="Home", callback_data="nav:home"),
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("📌 Track this CA", f"t:{short}:{address}"), _btn("🔄 Refresh", f"v:{short}:{address}")],
+        _trade_row(chain, address, pair_address),
+        _back_row(back=back),
     ])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def call_inline(call_id: int, chart_url: str | None = None, active: bool = True) -> InlineKeyboardMarkup:
+def call_inline(
+    call_id: int,
+    chart_url: str | None = None,
+    active: bool = True,
+    chain: Chain | None = None,
+    address: str | None = None,
+    pair_address: str | None = None,
+) -> InlineKeyboardMarkup:
+    back = "nav:active" if active else "nav:history"
     rows: list[list[InlineKeyboardButton]] = [[
-        InlineKeyboardButton(text="Refresh", callback_data=f"c:{call_id}"),
-        InlineKeyboardButton(text="Active", callback_data="nav:active"),
+        _btn("🔄 Refresh", f"c:{call_id}"),
+        _btn("📌 Active", "nav:active"),
     ]]
-    if chart_url:
-        rows.append([InlineKeyboardButton(text="Chart", url=str(chart_url))])
     if active:
-        rows.append([InlineKeyboardButton(text="Close call", callback_data=f"x:{call_id}")])
-    rows.append([InlineKeyboardButton(text="Home", callback_data="nav:home")])
+        rows.append([_btn("🛑 Close call", f"x:{call_id}")])
+    rows.append(_back_row(back=back))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def close_confirm_inline(call_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Confirm close", callback_data=f"z:{call_id}"),
-        InlineKeyboardButton(text="Cancel", callback_data=f"c:{call_id}"),
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("✅ Confirm close", f"z:{call_id}")],
+        _back_row(back=f"c:{call_id}"),
+    ])
 
 
-def calls_inline(calls, prefix: str = "c") -> InlineKeyboardMarkup:
+def calls_inline(calls, prefix: str = "c", back: str = "nav:home") -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for call in calls[:20]:
         symbol = (call.token.symbol or "TOKEN")[:10]
-        rows.append([InlineKeyboardButton(
-            text=f"#{call.id} ${symbol} {call.current_multiple:.2f}X",
-            callback_data=f"{prefix}:{call.id}",
+        trend = "🚀" if call.current_multiple >= 1 else "🧊"
+        rows.append([_btn(
+            f"{trend} #{call.id} ${symbol} {call.current_multiple:.2f}X",
+            f"{prefix}:{call.id}",
         )])
-    rows.append([
-        InlineKeyboardButton(text="Scan", callback_data="scan:all"),
-        InlineKeyboardButton(text="Home", callback_data="nav:home"),
-    ])
+    rows.append(_back_row(_btn("🔎 Scan", "nav:scan"), back=back))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def alert_buttons(call_id: int, chart_url: str | None = None) -> list[list[dict[str, str]]]:
-    row = [{"text": "Open call", "callback": f"c:{call_id}"}]
-    if chart_url:
-        row.append({"text": "Chart", "url": str(chart_url)})
-    return [row, [{"text": "Active", "callback": "nav:active"}]]
+def alert_buttons(
+    call_id: int,
+    chart_url: str | None = None,
+    chain: Chain | str | None = None,
+    address: str | None = None,
+    pair_address: str | None = None,
+) -> list[list[dict[str, str]]]:
+    rows: list[list[dict[str, str]]] = [[{"text": "📌 Open call", "callback": f"c:{call_id}"}]]
+    resolved = Chain(chain) if isinstance(chain, str) else chain
+    if resolved is not None and address:
+        dex = f"https://dexscreener.com/{resolved.value}/{pair_address or address}"
+        rows.append([
+            {"text": "📈 DEX", "url": dex},
+            {"text": "🧬 GMGN", "url": gmgn_url(resolved, address)},
+            {"text": "🛡 SAFETY", "url": rugcheck_url(resolved, address)},
+        ])
+    rows.append([{"text": "⬅️ Back", "callback": "nav:home"}, {"text": "📌 Active", "callback": "nav:active"}])
+    return rows
 
 
 def from_payload(buttons: list | None) -> InlineKeyboardMarkup | None:

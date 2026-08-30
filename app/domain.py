@@ -11,6 +11,11 @@ class Chain(StrEnum):
     SOLANA = "solana"
     ETHEREUM = "ethereum"
     BSC = "bsc"
+    BASE = "base"
+
+    @property
+    def is_evm(self) -> bool:
+        return self in {Chain.ETHEREUM, Chain.BSC, Chain.BASE}
 
 
 class RiskLevel(StrEnum):
@@ -32,21 +37,27 @@ class TokenSnapshot(BaseModel):
     market_cap: Decimal | None = None
     fdv: Decimal | None = None
     liquidity: Decimal | None = None
+    volume_m5: Decimal | None = None
     volume_1h: Decimal | None = None
     volume_6h: Decimal | None = None
     volume_24h: Decimal | None = None
+    price_change_m5: Decimal | None = None
     price_change_1h: Decimal | None = None
     price_change_6h: Decimal | None = None
     price_change_24h: Decimal | None = None
     buys: int | None = None
     sells: int | None = None
+    buys_m5: int | None = None
+    sells_m5: int | None = None
     transactions: int | None = None
+    boosted: bool = False
     holders: int | None = None
     top_holder_percentage: Decimal | None = None
     token_age_seconds: int | None = None
     pair_age_seconds: int | None = None
     dex: str | None = None
     pair_address: str | None = None
+    quote_symbol: str | None = None
     mint_authority: bool | None = None
     freeze_authority: bool | None = None
     contract_verified: bool | None = None
@@ -66,7 +77,7 @@ class TokenSnapshot(BaseModel):
     def normalize_address(cls, value: str, info):
         cleaned = value.strip()
         chain = info.data.get("chain")
-        return cleaned.lower() if chain in {Chain.ETHEREUM, Chain.BSC} else cleaned
+        return cleaned.lower() if isinstance(chain, Chain) and chain.is_evm else cleaned
 
 
 class FilterResult(BaseModel):
@@ -91,6 +102,51 @@ class ScoreResult(BaseModel):
     coverage: Decimal = Decimal("0")
 
 
+class CoinScan(BaseModel):
+    honeypot: bool | None = None
+    mint_authority: bool | None = None
+    freeze_authority: bool | None = None
+    ownership_renounced: bool | None = None
+    buy_tax: Decimal | None = None
+    sell_tax: Decimal | None = None
+    holders: int | None = None
+    top10_percent: Decimal | None = None
+    lp_locked: bool | None = None
+    lp_locked_percent: Decimal | None = None
+    verified: bool | None = None
+    proxy: bool | None = None
+    blacklist: bool | None = None
+    rugged: bool | None = None
+    source: str = "none"
+    safety_score: int | None = None
+    checks: dict[str, str] = Field(default_factory=dict)
+    flags: list[str] = Field(default_factory=list)
+    fatal: bool = False
+    top_holders: list[dict] = Field(default_factory=list)
+
+
+class RiskVerdict(StrEnum):
+    PASS = "PASS"
+    PASS_WITH_WARN = "PASS_WITH_WARN"
+    FAIL = "FAIL"
+    UNSCANNED = "UNSCANNED"
+
+
+class RiskCheck(BaseModel):
+    name: str
+    result: str
+    evidence: str = ""
+    critical: bool = False
+
+
+class DeepRiskReport(BaseModel):
+    verdict: RiskVerdict = RiskVerdict.UNSCANNED
+    checks: list[RiskCheck] = Field(default_factory=list)
+    critical: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    evidence: dict[str, str] = Field(default_factory=dict)
+
+
 class CandidateAnalysis(BaseModel):
     snapshot: TokenSnapshot
     filters: FilterResult
@@ -98,3 +154,9 @@ class CandidateAnalysis(BaseModel):
     score: ScoreResult
     ai_summary: str | None = None
     data_conflict: bool = False
+    degen_score: int = Field(0, ge=0, le=100)
+    degen_reasons: list[str] = Field(default_factory=list)
+    too_late: bool = False
+    coin_scan: CoinScan | None = None
+    deep_risk: DeepRiskReport | None = None
+    alpha: dict[str, int] = Field(default_factory=dict)

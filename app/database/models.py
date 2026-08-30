@@ -54,6 +54,7 @@ class Call(Base, TimestampMixin):
     highest_multiple: Mapped[Decimal] = mapped_column(MULTIPLE, default=Decimal("1"))
     highest_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     alert_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    source: Mapped[str] = mapped_column(String(16), default="OFFICIAL", index=True)
     token: Mapped[Token] = relationship(back_populates="calls")
     milestones: Mapped[list["Milestone"]] = relationship(back_populates="call", cascade="all, delete-orphan")
 

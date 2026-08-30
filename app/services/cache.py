@@ -19,3 +19,19 @@ class Coordination:
             await pipe.execute()
     async def heartbeat(self, service: str, ttl: int):
         await self.redis.set(f"heartbeat:{service}", "1", ex=ttl)
+
+    async def enabled_chains(self, fallback: tuple[str, ...]) -> tuple[str, ...]:
+        raw = await self.redis.get("config:enabled_chains")
+        if not raw:
+            return fallback
+        chains = tuple(item.strip().lower() for item in str(raw).split(",") if item.strip())
+        allowed = {"solana", "ethereum", "bsc", "base"}
+        cleaned = tuple(item for item in chains if item in allowed)
+        return cleaned or fallback
+
+    async def set_enabled_chains(self, chains: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+        cleaned = tuple(item for item in chains if item in {"solana", "ethereum", "bsc", "base"})
+        if not cleaned:
+            cleaned = ("solana",)
+        await self.redis.set("config:enabled_chains", ",".join(cleaned))
+        return cleaned

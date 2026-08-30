@@ -14,7 +14,7 @@ from app.config import Settings
 from app.domain import Chain, TokenSnapshot
 from app.market.base import ProviderError, TokenDiscoveryProvider
 
-CHAIN_IDS = {Chain.SOLANA: "solana", Chain.ETHEREUM: "ethereum", Chain.BSC: "bsc"}
+CHAIN_IDS = {Chain.SOLANA: "solana", Chain.ETHEREUM: "ethereum", Chain.BSC: "bsc", Chain.BASE: "base"}
 _EVM_ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 _SOLANA_ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 DISCOVERY_PATHS = (
@@ -82,7 +82,7 @@ def _rank(snapshot: TokenSnapshot) -> tuple[Decimal, Decimal, int]:
 def valid_contract_address(chain: Chain, address: Any) -> bool:
     if not isinstance(address, str):
         return False
-    pattern = _SOLANA_ADDRESS_RE if chain == Chain.SOLANA else _EVM_ADDRESS_RE
+    pattern = _SOLANA_ADDRESS_RE if not chain.is_evm else _EVM_ADDRESS_RE
     return bool(pattern.fullmatch(address.strip()))
 
 
@@ -104,20 +104,28 @@ class DexScreenerProvider(TokenDiscoveryProvider):
     name = "dexscreener"
 
     def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None):
-        self.client = client or httpx.AsyncClient(base_url=settings.dexscreener_base_url, timeout=15)
+        self.client = client or httpx.AsyncClient(
+            base_url=settings.dexscreener_base_url,
+            timeout=httpx.Timeout(6.0, connect=2.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=40),
+        )
         self._address_cache: tuple[float, dict[str, list[str]]] | None = None
         self._meta_cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._fresh_cache: tuple[float, dict[str, list[str]]] | None = None
+        self._snap_cache: dict[tuple[str, str], tuple[float, TokenSnapshot]] = {}
 
     async def close(self) -> None:
         await self.client.aclose()
 
     def normalize(self, chain: Chain, pair: dict[str, Any]) -> TokenSnapshot | None:
         base = _mapping(pair.get("baseToken"))
+        quote = _mapping(pair.get("quoteToken"))
         address = base.get("address")
         if not valid_contract_address(chain, address):
             return None
         tx = _mapping(pair.get("txns"))
         h24 = _mapping(tx.get("h24"))
+        m5 = _mapping(tx.get("m5"))
         volume = _mapping(pair.get("volume"))
         change = _mapping(pair.get("priceChange"))
         liq = pair.get("liquidity")
@@ -126,6 +134,8 @@ class DexScreenerProvider(TokenDiscoveryProvider):
         age = max(0, int((datetime.now(UTC) - created_dt).total_seconds())) if created_dt else None
         buys = h24.get("buys")
         sells = h24.get("sells")
+        buys_m5 = m5.get("buys")
+        sells_m5 = m5.get("sells")
         websites = info.get("websites") if isinstance(info.get("websites"), list) else []
         socials = info.get("socials") if isinstance(info.get("socials"), list) else []
         website = _http_url(websites[0].get("url") if websites and isinstance(websites[0], dict) else None)
@@ -140,19 +150,25 @@ class DexScreenerProvider(TokenDiscoveryProvider):
                 market_cap=dec(pair.get("marketCap")),
                 fdv=dec(pair.get("fdv")),
                 liquidity=dec(liq.get("usd")) if isinstance(liq, dict) else dec(liq),
+                volume_m5=dec(volume.get("m5")),
                 volume_1h=dec(volume.get("h1")),
                 volume_6h=dec(volume.get("h6")),
                 volume_24h=dec(volume.get("h24")),
+                price_change_m5=dec(change.get("m5")),
                 price_change_1h=dec(change.get("h1")),
                 price_change_6h=dec(change.get("h6")),
                 price_change_24h=dec(change.get("h24")),
                 buys=buys if isinstance(buys, int) else None,
                 sells=sells if isinstance(sells, int) else None,
+                buys_m5=buys_m5 if isinstance(buys_m5, int) else None,
+                sells_m5=sells_m5 if isinstance(sells_m5, int) else None,
                 transactions=(buys + sells) if isinstance(buys, int) and isinstance(sells, int) else None,
+                boosted=bool(pair.get("boosts") or pair.get("paid") or pair.get("hasBoost")),
                 pair_age_seconds=age,
                 token_age_seconds=age,
                 dex=pair.get("dexId"),
                 pair_address=pair.get("pairAddress"),
+                quote_symbol=quote.get("symbol"),
                 chart_url=_http_url(pair.get("url")),
                 website_url=website,
                 social_urls=social_urls,
@@ -163,7 +179,7 @@ class DexScreenerProvider(TokenDiscoveryProvider):
             return None
 
     async def _get(self, path: str) -> Any:
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = await self.client.get(path)
                 response.raise_for_status()
@@ -172,15 +188,15 @@ class DexScreenerProvider(TokenDiscoveryProvider):
                 status = exc.response.status_code
                 if status < 500 and status != 429:
                     raise ProviderError(f"DexScreener returned HTTP {status}") from exc
-                if attempt == 2:
+                if attempt == 1:
                     raise ProviderError(str(exc)) from exc
                 retry_after = dec(exc.response.headers.get("Retry-After"))
-                delay = float(retry_after) if retry_after is not None and 0 < retry_after <= 30 else 2 ** attempt
+                delay = float(retry_after) if retry_after is not None and 0 < retry_after <= 8 else 0.4
                 await asyncio.sleep(delay)
             except (httpx.HTTPError, ValueError) as exc:
-                if attempt == 2:
+                if attempt == 1:
                     raise ProviderError(str(exc)) from exc
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(0.3)
 
     async def _get_optional(self, path: str) -> Any:
         try:
@@ -217,42 +233,60 @@ class DexScreenerProvider(TokenDiscoveryProvider):
             if not valid_contract_address(chain, address):
                 continue
             address = address.strip()
-            key = address.lower() if chain in {Chain.ETHEREUM, Chain.BSC} else address
+            key = address.lower() if chain.is_evm else address
             if key in seen:
                 continue
             seen.add(key)
             unique.append(address)
-        snapshots: list[TokenSnapshot] = []
-        for index in range(0, len(unique), 30):
-            chunk = unique[index:index + 30]
+        async def fetch_chunk(chunk: list[str]) -> list[TokenSnapshot]:
             data = await self._get_optional(f"/tokens/v1/{CHAIN_IDS[chain]}/{','.join(chunk)}")
             pairs = pairs_from_payload(data)
             if not pairs:
                 data = await self._get_optional(f"/latest/dex/tokens/{','.join(chunk)}")
                 pairs = pairs_from_payload(data)
             grouped: dict[str, list[dict[str, Any]]] = {}
-            requested = {item.lower() if chain in {Chain.ETHEREUM, Chain.BSC} else item for item in chunk}
+            requested = {item.lower() if chain.is_evm else item for item in chunk}
+            found: list[TokenSnapshot] = []
             for pair in pairs:
                 base = _mapping(pair.get("baseToken")).get("address")
                 if not base:
                     continue
-                key = str(base).lower() if chain in {Chain.ETHEREUM, Chain.BSC} else str(base)
+                key = str(base).lower() if chain.is_evm else str(base)
                 if key not in requested:
                     continue
                 grouped.setdefault(key, []).append(pair)
             for group in grouped.values():
                 snapshot = self._best_snapshot(chain, group)
                 if snapshot:
-                    snapshots.append(snapshot)
+                    found.append(snapshot)
+            return found
+
+        chunks = [unique[index:index + 30] for index in range(0, len(unique), 30)]
+        parts = await asyncio.gather(*(fetch_chunk(chunk) for chunk in chunks), return_exceptions=True)
+        snapshots: list[TokenSnapshot] = []
+        for part in parts:
+            if isinstance(part, list):
+                snapshots.extend(part)
         return snapshots
 
     async def get_snapshot(self, chain: Chain, address: str) -> TokenSnapshot | None:
+        key = (chain.value, address.lower() if chain.is_evm else address)
+        hit = self._snap_cache.get(key)
+        if hit and monotonic() - hit[0] < 8:
+            return hit[1]
         snapshots = await self.get_snapshots(chain, [address])
-        return snapshots[0] if snapshots else None
+        if snapshots:
+            self._snap_cache[key] = (monotonic(), snapshots[0])
+            if len(self._snap_cache) > 120:
+                oldest = sorted(self._snap_cache, key=lambda item: self._snap_cache[item][0])[:40]
+                for item in oldest:
+                    self._snap_cache.pop(item, None)
+            return snapshots[0]
+        return None
 
     async def _discovery_addresses(self) -> dict[str, list[str]]:
         now = monotonic()
-        if self._address_cache and now - self._address_cache[0] < 25:
+        if self._address_cache and now - self._address_cache[0] < 12:
             return self._address_cache[1]
         buckets: dict[str, list[str]] = {chain.value: [] for chain in Chain}
         seen: dict[str, set[str]] = {chain.value: set() for chain in Chain}
@@ -263,7 +297,7 @@ class DexScreenerProvider(TokenDiscoveryProvider):
                 address = item.get("tokenAddress")
                 if chain_id not in seen or not valid_contract_address(Chain(chain_id), address):
                     continue
-                normalized = str(address).lower() if chain_id in {Chain.ETHEREUM.value, Chain.BSC.value} else str(address)
+                normalized = str(address).lower() if chain_id in {Chain.ETHEREUM.value, Chain.BSC.value, Chain.BASE.value} else str(address)
                 if normalized in seen[chain_id]:
                     continue
                 seen[chain_id].add(normalized)
@@ -273,10 +307,10 @@ class DexScreenerProvider(TokenDiscoveryProvider):
 
     async def _meta_pairs(self) -> list[dict[str, Any]]:
         now = monotonic()
-        if self._meta_cache and now - self._meta_cache[0] < 25:
+        if self._meta_cache and now - self._meta_cache[0] < 12:
             return self._meta_cache[1]
         trending = items_from_payload(await self._get_optional("/metas/trending/v1"))
-        slugs = [item.get("slug") for item in trending[:6] if item.get("slug")]
+        slugs = [item.get("slug") for item in trending[:4] if item.get("slug")]
         results = await asyncio.gather(
             *(self._get_optional(f"/metas/meta/v1/{slug}") for slug in slugs),
             return_exceptions=True,
@@ -288,14 +322,84 @@ class DexScreenerProvider(TokenDiscoveryProvider):
         self._meta_cache = (now, pairs)
         return pairs
 
-    async def discover_tokens(self, chain: Chain) -> list[TokenSnapshot]:
-        addresses = (await self._discovery_addresses()).get(chain.value, [])[:40]
-        fetched = await self.get_snapshots(chain, addresses)
-        meta_snapshots = []
-        for pair in await self._meta_pairs():
-            if pair.get("chainId") != CHAIN_IDS[chain]:
+    async def _fresh_addresses(self, chains: list[Chain] | None = None) -> dict[str, list[str]]:
+        wanted = chains or list(Chain)
+        now = monotonic()
+        if self._fresh_cache and now - self._fresh_cache[0] < 20:
+            cached = self._fresh_cache[1]
+            return {chain.value: list(cached.get(chain.value, [])) for chain in wanted}
+        networks = {
+            Chain.SOLANA: "solana",
+            Chain.ETHEREUM: "eth",
+            Chain.BSC: "bsc",
+            Chain.BASE: "base",
+        }
+        buckets: dict[str, list[str]] = {chain.value: [] for chain in Chain}
+        jobs = []
+        for chain in wanted:
+            network = networks.get(chain)
+            if not network:
                 continue
-            snapshot = self.normalize(chain, pair)
-            if snapshot and snapshot.price and snapshot.price > 0:
-                meta_snapshots.append(snapshot)
-        return self._merge(fetched + meta_snapshots)
+            jobs.append((chain, f"https://api.geckoterminal.com/api/v2/networks/{network}/new_pools"))
+            jobs.append((chain, f"https://api.geckoterminal.com/api/v2/networks/{network}/trending_pools"))
+        results = await asyncio.gather(*(self._get_optional(url) for _, url in jobs), return_exceptions=True)
+        seen: dict[str, set[str]] = {chain.value: set() for chain in Chain}
+        for (chain, _), data in zip(jobs, results):
+            if not isinstance(data, dict):
+                continue
+            rows = data.get("data") if isinstance(data.get("data"), list) else []
+            for item in rows:
+                if not isinstance(item, dict):
+                    continue
+                rel = ((item.get("relationships") or {}).get("base_token") or {}).get("data") or {}
+                ident = str(rel.get("id") or "")
+                address = ident.split("_", 1)[1] if "_" in ident else ""
+                if not address or not valid_contract_address(chain, address):
+                    continue
+                key = address.lower() if chain.is_evm else address
+                if key in seen[chain.value]:
+                    continue
+                seen[chain.value].add(key)
+                buckets[chain.value].append(address)
+        self._fresh_cache = (now, buckets)
+        return buckets
+
+    async def discover_tokens(self, chain: Chain) -> list[TokenSnapshot]:
+        found = await self.discover_many([chain])
+        return found.get(chain, [])
+
+    async def discover_many(self, chains: list[Chain]) -> dict[Chain, list[TokenSnapshot]]:
+        if not chains:
+            return {}
+        addresses_task = asyncio.create_task(self._discovery_addresses())
+        meta_task = asyncio.create_task(self._meta_pairs())
+        fresh_task = asyncio.create_task(self._fresh_addresses(chains))
+        buckets = await addresses_task
+        fresh = await fresh_task
+
+        async def load(chain: Chain) -> tuple[Chain, list[TokenSnapshot]]:
+            merged: list[str] = []
+            seen: set[str] = set()
+            for address in (fresh.get(chain.value, []) + buckets.get(chain.value, [])):
+                key = address.lower() if chain.is_evm else address
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(address)
+            addresses = merged[:30]
+            fetched = await self.get_snapshots(chain, addresses) if addresses else []
+            meta_snapshots = []
+            for pair in await meta_task:
+                if pair.get("chainId") != CHAIN_IDS[chain]:
+                    continue
+                snapshot = self.normalize(chain, pair)
+                if snapshot and snapshot.price and snapshot.price > 0:
+                    meta_snapshots.append(snapshot)
+            return chain, self._merge(fetched + meta_snapshots)
+
+        loaded = await asyncio.gather(*(load(chain) for chain in chains), return_exceptions=True)
+        result: dict[Chain, list[TokenSnapshot]] = {}
+        for item in loaded:
+            if isinstance(item, tuple):
+                result[item[0]] = item[1]
+        return result

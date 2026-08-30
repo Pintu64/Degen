@@ -8,7 +8,7 @@ from app.scanner.scoring import ScoringEngine
 import pytest
 
 def snapshot(**overrides):
-    values=dict(chain=Chain.SOLANA,contract_address="abc",price=Decimal("1"),liquidity=Decimal("50000"),volume_24h=Decimal("100000"),transactions=200,buys=120,sells=80,price_change_1h=Decimal("5"),price_change_6h=Decimal("10"),timestamp=datetime.now(UTC),provider="test")
+    values=dict(chain=Chain.SOLANA,contract_address="abc",price=Decimal("1"),liquidity=Decimal("25000"),market_cap=Decimal("80000"),volume_24h=Decimal("100000"),transactions=200,buys=120,sells=80,buys_m5=30,sells_m5=10,price_change_m5=Decimal("4"),price_change_1h=Decimal("5"),price_change_6h=Decimal("10"),pair_age_seconds=900,timestamp=datetime.now(UTC),provider="test")
     values.update(overrides); return TokenSnapshot(**values)
 def test_filter_passes_configured_thresholds(): assert FilterEngine(Settings()).evaluate(snapshot()).passed
 def test_unknown_risk_when_authority_data_missing(): assert RiskAnalyzer().assess(snapshot()).level==RiskLevel.UNKNOWN
@@ -20,6 +20,10 @@ def test_config_rejects_duplicate_milestones():
 
 def test_config_rejects_unknown_chain():
     with pytest.raises(ValueError): Settings(enabled_chains="solana,unknown")
+
+def test_config_accepts_base_chain():
+    settings = Settings(_env_file=None, enabled_chains="solana,ethereum,bsc,base")
+    assert settings.enabled_chains == ("solana", "ethereum", "bsc", "base")
 
 def test_csv_environment_values(monkeypatch):
     monkeypatch.setenv("DEFAULT_MILESTONES","1.25,1.5,2,3")

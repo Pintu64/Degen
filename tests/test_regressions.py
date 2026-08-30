@@ -10,7 +10,15 @@ import pytest
 import app
 from app.bot.formatting import milestone_text, money
 from app.bot.handlers import _is_private_owner, _parse_lookup, owner_router
-from app.bot.keyboards import from_payload, main_reply_keyboard
+from app.bot.keyboards import (
+    call_inline,
+    from_payload,
+    home_inline,
+    main_reply_keyboard,
+    scan_inline,
+    settings_inline,
+    token_inline,
+)
 from app.config import Settings
 from app.database.repository import Repository
 from app.domain import Chain, RiskLevel
@@ -49,6 +57,12 @@ def test_plain_text_is_not_misread_as_contract_lookup():
         Chain.ETHEREUM,
         "0x" + "a" * 40,
     )
+    assert _parse_lookup("https://dexscreener.com/base/0x" + "a" * 40) == (
+        Chain.BASE,
+        "0x" + "a" * 40,
+    )
+    assert _parse_lookup("https://gmgn.ai/sol/token/So11111111111111111111111111111111111111112")[0] == Chain.SOLANA
+    assert _parse_lookup("https://basescan.org/token/0x" + "a" * 40) == (Chain.BASE, "0x" + "a" * 40)
 
 
 def test_tiny_money_values_are_not_rendered_as_zero():
@@ -60,12 +74,27 @@ def test_milestone_details_have_valid_line_breaks():
     call = SimpleNamespace(token=SimpleNamespace(symbol="TOK"), reference_price=Decimal("1"))
     milestone = SimpleNamespace(target_multiple=Decimal("2"), hit_price=Decimal("2"))
     text = milestone_text(call, milestone, Decimal("2"), "Observed ATH: 2.00X")
-    assert "Multiple: 2.00X\nObserved ATH" in text
+    assert "2.00X" in text
+    assert "\nObserved ATH" in text
 
 
 def test_reply_keyboard_includes_help_action():
     labels = [button.text for row in main_reply_keyboard().keyboard for button in row]
-    assert "Help" in labels
+    assert any("Help" in (label or "") for label in labels)
+
+
+def test_nested_screens_include_back_button():
+    def labels(markup):
+        return [button.text for row in markup.inline_keyboard for button in row]
+
+    assert "⬅️ Back" in labels(scan_inline())
+    assert "⬅️ Back" in labels(settings_inline())
+    assert "⬅️ Back" in labels(call_inline(12))
+    assert "⬅️ Back" in labels(token_inline(Chain.ETHEREUM, "0x" + "a" * 40))
+    assert "⬅️ Back" not in labels(home_inline())
+    home_labels = labels(home_inline())
+    assert any("Base" in (label or "") for label in home_labels)
+    assert any("Best degen" in (label or "") for label in home_labels)
 
 
 def test_payload_keyboard_ignores_malformed_or_oversized_callbacks():

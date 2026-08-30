@@ -21,19 +21,26 @@ class Settings(BaseSettings):
     solana_api_key: str | None = None
     ethereum_api_key: str | None = None
     bsc_api_key: str | None = None
+    base_api_key: str | None = None
+    fluxrpc_api_key: str | None = None
+    fluxrpc_url: str | None = None
+    flux_shield_url: str | None = None
+    birdeye_api_key: str | None = None
+    birdeye_base_url: str = "https://public-api.birdeye.so"
     ai_enabled: bool = True
     ai_api_key: str | None = None
     ai_base_url: str = "https://agentrouter.org/v1"
     ai_model: str = "glm-5.3"
     ai_timeout_seconds: int = Field(15, ge=1, le=60)
     ai_failure_cooldown_seconds: int = Field(900, ge=30)
-    tracking_interval_seconds: int = Field(30, ge=10)
-    scan_interval_seconds: int = Field(30, ge=10)
+    tracking_interval_seconds: int = Field(10, ge=5)
+    scan_interval_seconds: int = Field(8, ge=5)
     snapshot_retention_days: int = Field(30, ge=1)
-    min_liquidity_usd: Decimal = Field(Decimal("25000"), ge=0)
-    min_volume_24h_usd: Decimal = Field(Decimal("50000"), ge=0)
-    min_txns_24h: int = Field(100, ge=0)
-    min_score: int = Field(70, ge=0, le=100)
+    min_liquidity_usd: Decimal = Field(Decimal("5000"), ge=0)
+    min_volume_24h_usd: Decimal = Field(Decimal("3000"), ge=0)
+    min_txns_24h: int = Field(20, ge=0)
+    min_score: int = Field(78, ge=0, le=100)
+    warn_call_score: int = Field(85, ge=0, le=100)
     max_top_holder_percent: Decimal = Field(Decimal("35"), ge=0, le=100)
     min_data_quality: Decimal = Field(Decimal("0.55"), ge=0, le=1)
     max_data_age_seconds: int = Field(180, ge=1)
@@ -50,7 +57,18 @@ class Settings(BaseSettings):
         Decimal("1.25"), Decimal("1.5"), Decimal("2"), Decimal("3"),
         Decimal("5"), Decimal("10"), Decimal("20"), Decimal("50"),
     )
-    enabled_chains: Annotated[tuple[str, ...], NoDecode] = ("solana", "ethereum", "bsc")
+    enabled_chains: Annotated[tuple[str, ...], NoDecode] = ("solana", "ethereum", "bsc", "base")
+    max_degen_picks: int = Field(1, ge=1, le=4)
+    max_degen_alerts_per_cycle: int = Field(1, ge=1, le=2)
+    max_degen_market_cap_usd: Decimal = Field(Decimal("220000"), ge=0)
+    max_degen_liquidity_usd: Decimal = Field(Decimal("90000"), ge=0)
+    max_degen_24h_change_percent: Decimal = Field(Decimal("250"), ge=0)
+    min_degen_pair_age_seconds: int = Field(60, ge=0)
+    max_degen_pair_age_seconds: int = Field(86400, ge=60)
+    preferred_degen_pair_age_seconds: int = Field(4500, ge=60)
+    official_call_gap_seconds: int = Field(600, ge=60)
+    nuke_score: int = Field(90, ge=80, le=100)
+    close_score_delta: int = Field(2, ge=0, le=20)
     log_level: str = "INFO"
     web_port: int = 8080
 
@@ -76,7 +94,7 @@ class Settings(BaseSettings):
         normalized = tuple(item.lower() for item in value)
         if not normalized:
             raise ValueError("ENABLED_CHAINS must contain at least one chain")
-        invalid = set(normalized) - {"solana", "ethereum", "bsc"}
+        invalid = set(normalized) - {"solana", "ethereum", "bsc", "base"}
         if invalid:
             raise ValueError(f"Unsupported chains: {', '.join(sorted(invalid))}")
         return normalized
