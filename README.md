@@ -48,7 +48,7 @@ Do **not** put tokens in git. Railway variables only.
 
 Railway does not infer secrets from `.env.example`. Telegram and optional AI keys must remain manually entered as protected variables. Railway's PostgreSQL URL may begin with `postgresql://`; the application converts it to the async driver URL automatically.
 
-Do not expose multiple `bot` replicas because Telegram long polling permits one consumer. Scanner/tracker duplicate protection uses Redis cooldown locks and atomic PostgreSQL milestone claims.
+Do not expose multiple `bot` replicas because Telegram long polling permits one consumer. Scanner/tracker duplicate protection uses Postgres cooldown locks and atomic milestone claims.
 
 ## Local start
 

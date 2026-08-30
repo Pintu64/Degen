@@ -32,6 +32,7 @@ class Coordination:
         expires = self._now() + timedelta(seconds=max(1, ttl))
         async with self.sessions() as session:
             await self._purge(session)
+            await session.flush()
             try:
                 session.add(CoordKV(key=key, value="1", expires_at=expires))
                 await session.commit()

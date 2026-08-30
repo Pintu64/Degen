@@ -7,10 +7,6 @@ services:
       POSTGRES_PASSWORD: scanner
     volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U scanner"], interval: 5s, timeout: 5s, retries: 10}
-  redis:
-    image: redis:7-alpine
-    volumes: [redis_data:/data]
-    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 5s, retries: 10}
   migrate:
     build: .
     command: alembic upgrade head
@@ -20,24 +16,24 @@ services:
     build: .
     env_file: .env
     environment: {SERVICE_ROLE: bot}
-    depends_on: {migrate: {condition: service_completed_successfully}, redis: {condition: service_healthy}}
+    depends_on: {migrate: {condition: service_completed_successfully}}
     restart: unless-stopped
   scanner:
     build: .
     env_file: .env
     environment: {SERVICE_ROLE: scanner}
-    depends_on: {migrate: {condition: service_completed_successfully}, redis: {condition: service_healthy}}
+    depends_on: {migrate: {condition: service_completed_successfully}}
     restart: unless-stopped
   tracker:
     build: .
     env_file: .env
     environment: {SERVICE_ROLE: tracker}
-    depends_on: {migrate: {condition: service_completed_successfully}, redis: {condition: service_healthy}}
+    depends_on: {migrate: {condition: service_completed_successfully}}
     restart: unless-stopped
   telegram:
     build: .
     env_file: .env
     environment: {SERVICE_ROLE: telegram}
-    depends_on: {migrate: {condition: service_completed_successfully}, redis: {condition: service_healthy}}
+    depends_on: {migrate: {condition: service_completed_successfully}}
     restart: unless-stopped
-volumes: {postgres_data: {}, redis_data: {}}
+volumes: {postgres_data: {}}
